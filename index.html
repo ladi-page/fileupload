@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GitHub File Manager</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#0b1020;color:#edf2ff;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+button,input,select{font:inherit}button{cursor:pointer;border:0;border-radius:10px;padding:10px 14px;font-weight:700;background:#79a9ff;color:#08111f}button:disabled{opacity:.5;cursor:not-allowed}
+.secondary{background:#18233b;color:#edf2ff;border:1px solid #2b3a5c}.danger{background:transparent;color:#ff7787;border:1px solid #633541}
+.wrap{max-width:1280px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:20px}.top h1{margin:0;font-size:26px}.muted{color:#91a0bd;font-size:13px}
+.card{background:#121a2d;border:1px solid #293653;border-radius:15px;padding:17px;margin-bottom:15px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+label{font-size:12px;color:#91a0bd;font-weight:700}input,select{width:100%;margin-top:6px;background:#0d1527;color:#edf2ff;border:1px solid #293653;border-radius:9px;padding:11px;outline:none}input:focus,select:focus{border-color:#79a9ff}
+.row{display:flex;align-items:center;gap:10px}.grow{flex:1}.actions{display:flex;gap:9px;align-items:end;flex-wrap:wrap}.actions>*{flex:1;min-width:130px}
+.repo-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.repo{padding:12px;border:1px solid #293653;border-radius:11px;background:#0e1628;cursor:pointer}.repo.active{border-color:#79a9ff;background:#13213a}.repo b{display:block}.repo small{color:#91a0bd}
+.pathbar{display:flex;gap:8px}.pathbar input{margin:0}.pathbar button{flex:0 0 auto}
+.drop{border:1px dashed #3a4c72;border-radius:12px;padding:22px;text-align:center;color:#91a0bd;transition:.15s}.drop.drag{border-color:#79a9ff;color:#fff;background:#101c33}
+.files{border:1px solid #293653;border-radius:12px;overflow:hidden}.file{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #202b45}.file:last-child{border-bottom:0}.icon{width:27px;text-align:center}.fname{flex:1;min-width:0}.fname b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fname small{color:#91a0bd}.file button,.file a{flex:0 0 auto}.link{text-decoration:none}
+.notice{padding:11px 13px;border-radius:10px;background:#122a42;border:1px solid #27537a;margin-bottom:12px}.err{background:#351c27;border-color:#693644;color:#ffb0b9}
+.modal{position:fixed;inset:0;background:#0009;display:none;place-items:center;padding:20px;z-index:10}.modal.show{display:grid}.modalbox{width:min(620px,100%);background:#121a2d;border:1px solid #293653;border-radius:16px;padding:20px}.modalhead{display:flex;justify-content:space-between;align-items:center}.close{background:transparent;color:#fff;font-size:22px;padding:4px}.help{background:#0d1527;border:1px solid #293653;padding:12px;border-radius:10px;color:#b7c2d8;font-size:12px;line-height:1.6}
+.hidden{display:none!important}.status{font-size:12px;color:#8ee0a7}.empty{text-align:center;padding:35px;color:#91a0bd}
+@media(max-width:850px){.grid{grid-template-columns:1fr 1fr}.repo-grid{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}
+@media(max-width:560px){.grid{grid-template-columns:1fr}.wrap{padding:14px}.file .open{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+<div><h1>GitHub File Manager</h1><div class="muted">One dashboard • multiple repositories • upload / replace / delete</div></div>
+<div class="status" id="status">Not connected</div>
+</header>
+
+<section class="card" id="connectCard">
+<h3>Connect GitHub</h3>
+<p class="muted">Use a GitHub Fine-grained Personal Access Token. It is kept only in this browser tab's memory and is never written into this page's source.</p>
+<div class="grid">
+<label>GitHub username<input id="ghUser" placeholder="your-username" autocomplete="username"></label>
+<label style="grid-column:span 2">GitHub token<input id="ghToken" type="password" placeholder="github_pat_..." autocomplete="off"></label>
+<div class="row"><button id="connect">Connect</button><button class="secondary" id="forget">Clear</button></div>
+</div>
+<div class="help" style="margin-top:12px">Token permission: <b>Contents → Read and write</b>. Limit the token to only the repositories you want this dashboard to manage.</div>
+</section>
+
+<section class="card hidden" id="repoCard">
+<div class="row"><div class="grow"><h3 style="margin:0">Repositories</h3><div class="muted">Add as many repositories as your token allows.</div></div><button id="addBtn">+ Add repository</button></div>
+<div id="repos" class="repo-grid" style="margin-top:12px"></div>
+</section>
+
+<section class="card hidden" id="manager">
+<div class="row" style="margin-bottom:12px">
+<div class="grow"><h3 id="repoTitle" style="margin:0">Repository</h3><div class="muted" id="repoMeta"></div></div>
+<button class="secondary" id="refresh">Refresh</button>
+</div>
+<div class="pathbar">
+<input id="path" placeholder="Folder path, e.g. public/assets">
+<button class="secondary" id="openPath">Open</button>
+<button class="secondary" id="root">Root</button>
+<button class="secondary" id="up">Up</button>
+</div>
+<div class="muted" id="crumb" style="margin:10px 0 14px;font-family:monospace">/</div>
+<div id="message"></div>
+
+<div class="drop" id="drop">
+<div><b>Drag & drop files here</b> or select files below</div>
+<div class="muted">No artificial file-size setting is imposed by this dashboard. GitHub's own API/repository limits still apply.</div>
+</div>
+<div class="actions" style="margin-top:10px">
+<input id="picker" type="file" multiple>
+<input id="commitMsg" value="Update files" placeholder="Commit message">
+<button id="upload">Upload selected</button>
+</div>
+<div class="files" id="files" style="margin-top:15px"></div>
+</section>
+
+<footer class="muted" style="text-align:center;margin-top:20px">GitHub File Manager — token is never embedded in the source code.</footer>
+</div>
+
+<div class="modal" id="modal">
+<div class="modalbox">
+<div class="modalhead"><h3>Add GitHub repository</h3><button class="close" id="close">×</button></div>
+<div class="grid" style="grid-template-columns:1fr 1fr;margin-top:15px">
+<label>Owner<input id="rOwner" placeholder="username or organization"></label>
+<label>Repository<input id="rRepo" placeholder="repository-name"></label>
+<label>Branch<input id="rBranch" value="main"></label>
+<label>Dashboard name<input id="rName" placeholder="My Website"></label>
+</div>
+<div class="help" style="margin-top:14px">Example: Owner <b>raj123</b>, Repository <b>redirect-site</b>, Branch <b>main</b>.</div>
+<div class="actions" style="margin-top:15px"><button id="saveRepo">Add repository</button><button class="secondary" id="cancel">Cancel</button></div>
+</div>
+</div>
+
+<script>
+let TOKEN="", USER="", REPOS=[], ACTIVE=-1, PATH="";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const headers=()=>({"Authorization":"Bearer "+TOKEN,"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"});
+function note(t,e=false){$("message").innerHTML=t?`<div class="${e?"notice err":"notice"}">${esc(t)}</div>`:""}
+function human(n){if(!n)return"0 B";let u=["B","KB","MB","GB","TB"],i=Math.min(Math.floor(Math.log(n)/Math.log(1024)),u.length-1);return (n/1024**i).toFixed(i?1:0)+" "+u[i]}
+async function api(path,opt={}){let r=await fetch("https://api.github.com"+path,{...opt,headers:{...headers(),...(opt.headers||{})}});let tx=await r.text(),d;try{d=JSON.parse(tx)}catch{d={message:tx}}if(!r.ok)throw Error(d.message||"GitHub API error");return d}
+function repo(){return REPOS[ACTIVE]}
+function save(){sessionStorage.setItem("gfm_repos",JSON.stringify(REPOS))}
+function renderRepos(){
+ const box=$("repos");box.innerHTML="";
+ REPOS.forEach((r,i)=>{let d=document.createElement("div");d.className="repo "+(i===ACTIVE?"active":"");d.innerHTML=`<b>${esc(r.name)}</b><small>${esc(r.owner)}/${esc(r.repo)} • ${esc(r.branch)}</small>`;
+ d.onclick=()=>{ACTIVE=i;PATH="";$("path").value="";renderRepos();load()};box.appendChild(d)})
+}
+function openModal(){ $("modal").classList.add("show") }
+function closeModal(){ $("modal").classList.remove("show") }
+$("addBtn").onclick=openModal;$("close").onclick=closeModal;$("cancel").onclick=closeModal;
+$("saveRepo").onclick=async()=>{
+ let owner=$("rOwner").value.trim(),r=$("rRepo").value.trim(),branch=$("rBranch").value.trim()||"main",name=$("rName").value.trim()||r;
+ if(!owner||!r)return alert("Owner and repository are required.");
+ try{await api(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(r)}`);REPOS.push({owner,repo:r,branch,name});ACTIVE=REPOS.length-1;save();renderRepos();closeModal();$("repoCard").classList.remove("hidden");$("manager").classList.remove("hidden");load()}
+ catch(e){alert("Repository check failed: "+e.message)}
+}
+$("connect").onclick=async()=>{
+ USER=$("ghUser").value.trim();TOKEN=$("ghToken").value.trim();
+ if(!USER||!TOKEN)return alert("Enter GitHub username and token.");
+ try{let me=await api("/user");$("status").textContent="Connected: "+me.login;$("connectCard").classList.add("hidden");$("repoCard").classList.remove("hidden");
+ try{REPOS=JSON.parse(sessionStorage.getItem("gfm_repos")||"[]")}catch{REPOS=[]}
+ renderRepos();if(REPOS.length){ACTIVE=0;renderRepos();$("manager").classList.remove("hidden");load()}
+ }catch(e){TOKEN="";alert("Connection failed: "+e.message)}
+}
+$("forget").onclick=()=>{TOKEN="";USER="";REPOS=[];ACTIVE=-1;PATH="";sessionStorage.removeItem("gfm_repos");location.reload()}
+$("openPath").onclick=()=>{PATH=$("path").value.replace(/^\/+|\/+$/g,"");load()}
+$("root").onclick=()=>{PATH="";$("path").value="";load()}
+$("up").onclick=()=>{let a=PATH.split("/").filter(Boolean);a.pop();PATH=a.join("/");$("path").value=PATH;load()}
+$("refresh").onclick=load;
+
+async function load(){
+ let r=repo();if(!r)return;
+ $("manager").classList.remove("hidden");$("repoTitle").textContent=r.name;$("repoMeta").textContent=`${r.owner}/${r.repo} • branch: ${r.branch}`;$("crumb").textContent="/"+PATH;
+ note("Loading...");
+ try{
+  let p=PATH?`/repos/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}/contents/${PATH}`:`/repos/${encodeURIComponent(r.owner)}/${encodeURIComponent(r.repo)}/contents`;
+  p+=`?ref=${encodeURIComponent(r.branch)}`;
+  let data=await api(p),arr=Array.isArray(data)?data:[data];arr.sort((a,b)=>(a.type==="dir"?0:1)-(b.type==="dir"?0:1)||a.name.localeCompare(b.name));
+  $("files").innerHTML=arr.length?arr.map(x=>`<div class="file">
+  <div class="icon">${x.type==="dir"?"📁":"📄"}</div>
+  <div class="fname ${x.type==="dir"?"click":""}" data-path="${esc(x.path)}" data-type="${x.type}"><b>${esc(x.name)}</b><small>${x.type==="file"?human(x.size):"Folder"}</small></div>
+  ${x.html_url?`<a class="secondary link open" target="_blank" href="${x.html_url}">GitHub</a>`:""}
+  <button class="danger del" data-path="${esc(x.path)}" data-sha="${esc(x.sha)}">Delete</button>
+  </div>`).join(""):`<div class="empty">This folder is empty.</div>`;
+  document.querySelectorAll(".click").forEach(e=>e.onclick=()=>{PATH=e.dataset.path;$("path").value=PATH;load()});
+  document.querySelectorAll(".del").forEach(e=>e.onclick=()=>del(e.dataset.path,e.dataset.sha));
+  note("");
+ }catch(e){note(e.message,true)}
+}
+async function del(path,sha){
+ if(!confirm("Delete "+path+"?"))return;let r=repo();
+ try{await api(`/repos/${r.owner}/${r.repo}/contents/${path}`,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:"Delete "+path,sha,branch:r.branch})});note("Deleted "+path);load()}
+ catch(e){note(e.message,true)}
+}
+async function putOne(file){
+ let r=repo(),target=PATH?PATH+"/"+file.name:file.name,sha;
+ let existing;
+ try{existing=await api(`/repos/${r.owner}/${r.repo}/contents/${target}?ref=${encodeURIComponent(r.branch)}`);if(!Array.isArray(existing))sha=existing.sha}catch(_){}
+ let buf=await file.arrayBuffer(),u=new Uint8Array(buf),bin="",CH=0x8000;
+ for(let i=0;i<u.length;i+=CH)bin+=String.fromCharCode(...u.subarray(i,i+CH));
+ let body={message:$("commitMsg").value.trim()||("Update "+target),content:btoa(bin),branch:r.branch};if(sha)body.sha=sha;
+ await api(`/repos/${r.owner}/${r.repo}/contents/${target}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+ return target;
+}
+async function upload(){
+ let fs=[...$("picker").files];if(!fs.length)return note("Select at least one file.",true);let r=repo();if(!r)return;
+ $("upload").disabled=true;let done=0;
+ try{for(let f of fs){note(`Uploading ${f.name} (${human(f.size)}) — ${done+1}/${fs.length}`);await putOne(f);done++}note(`Uploaded ${done} file(s).`);$("picker").value="";load()}
+ catch(e){note("Upload stopped: "+e.message,true)}finally{$("upload").disabled=false}
+}
+$("upload").onclick=upload;
+$("drop").ondragover=e=>{e.preventDefault();$("drop").classList.add("drag")}
+$("drop").ondragleave=()=>$("drop").classList.remove("drag")
+$("drop").ondrop=e=>{e.preventDefault();$("drop").classList.remove("drag");if(e.dataTransfer.files.length){$("picker").files=e.dataTransfer.files;upload()}}
+</script>
+</body>
+</html>
