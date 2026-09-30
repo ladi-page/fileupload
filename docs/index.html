@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GitHub File Manager</title>
+<style>
+:root{--bg:#0b1020;--panel:#121a2d;--panel2:#18223a;--line:#293653;--text:#eef2ff;--muted:#91a0bd;--accent:#79a9ff;--danger:#ff7382}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,sans-serif}
+button,input,select{font:inherit}button{cursor:pointer;border:0;border-radius:10px;padding:11px 15px;font-weight:700;background:var(--accent);color:#08111f}
+button:disabled{opacity:.5;cursor:not-allowed}.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+.danger{background:transparent;color:var(--danger);border:1px solid #56313b}
+.wrap{max-width:1200px;margin:auto;padding:28px 18px 60px}header{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:22px}
+h1{margin:0 0 5px;font-size:27px}p,small{color:var(--muted)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:17px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}label{font-size:12px;color:var(--muted);font-weight:700}input,select{width:100%;margin-top:6px;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0d1527;color:var(--text)}
+.actions{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.actions>*{flex:1}.repoRow{display:grid;grid-template-columns:1fr auto;gap:10px}
+.toolbar{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.toolbar label{flex:1;min-width:200px}.toolbar button{flex:0 0 auto}
+.notice{background:#13253b;border:1px solid #234b71;padding:12px;border-radius:10px;margin-bottom:14px;word-break:break-word}
+.error{background:#341b25;border:1px solid #693543;color:#ffadb7;padding:12px;border-radius:10px;margin-bottom:14px;word-break:break-word}
+.files{border:1px solid var(--line);border-radius:12px;overflow:hidden}.row{display:flex;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid #202b45}.row:last-child{border:0}.icon{width:25px}.name{flex:1;min-width:0}.name b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.name small{display:block}.click{cursor:pointer}.hidden{display:none}.crumb{color:var(--muted);font-family:monospace;margin-bottom:12px;word-break:break-all}
+#drop{border:1px dashed #405274;padding:25px;text-align:center;border-radius:12px;color:var(--muted)}#drop.drag{border-color:var(--accent);color:var(--text)}
+footer{text-align:center;color:#64718c;font-size:12px;margin-top:20px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}header{align-items:flex-start;flex-direction:column}.row .open{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+<div><h1>GitHub File Manager</h1><p>GitHub Pages • multi-repository file manager</p></div>
+<div id="state">Not connected</div>
+</header>
+
+<section class="panel" id="connectPanel">
+<h3>Connect GitHub</h3>
+<p>Use a fine-grained PAT with Contents: Read and write. The token stays in memory only and is never saved by this page.</p>
+<div class="grid">
+<label>GitHub username<input id="ghUser" autocomplete="username" placeholder="your-github-username"></label>
+<label>Fine-grained token<input id="token" type="password" autocomplete="off" placeholder="github_pat_..."></label>
+</div>
+br>
+<div class="actions"><button id="connect">Connect</button><button class="secondary" id="clear">Clear session</button></div>
+</section>
+
+<section class="panel hidden" id="appPanel">
+<h3>Repositories</h3>
+<div class="grid">
+<label>Owner<input id="owner" placeholder="username or organization"></label>
+<label>Repository<input id="repo" placeholder="repository-name"></label>
+<label>Branch<input id="branch" value="main"></label>
+<label>Display name<input id="display" placeholder="My Website"></label>
+</div>
+br>
+<div class="actions"><button id="addRepo">Add repository</button><select id="repoSelect"></select><button class="secondary" id="removeRepo">Remove</button></div>
+</section>
+
+<section class="panel hidden" id="manager">
+<div class="toolbar">
+<label>Path<input id="path" value="" placeholder="root"></label>
+<button id="go">Open</button><button class="secondary" id="root">Root</button><button class="secondary" id="up">Up</button>
+</div>
+<br>
+<div id="crumb" class="crumb">/</div>
+<div id="notice"></div>
+<div id="drop">Drop files here or use the file picker below</div>
+<br>
+<div class="actions">
+<input id="file" type="file">
+<input id="commit" placeholder="Commit message" value="Update file">
+<button id="upload">Upload / Replace</button>
+</div>
+<br>
+<div class="files" id="files"></div>
+</section>
+
+<footer>GitHub File Manager — no token is hard-coded into the page.</footer>
+</div>
+
+<script>
+let token="", user="", currentPath="";
+let repos=JSON.parse(sessionStorage.getItem("gfm_repos")||"[]");
+
+const $=id=>document.getElementById(id);
+function msg(text,error=false){$("notice").innerHTML=text?`<div class="${error?"error":"notice"}">${esc(text)}</div>`:""}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function apiHeaders(){return {"Authorization":"Bearer "+token,"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"}}
+function saveRepos(){sessionStorage.setItem("gfm_repos",JSON.stringify(repos))}
+function repo(){return repos[parseInt($("repoSelect").value)]}
+function size(n){if(!n)return"0 B";let u=["B","KB","MB","GB","TB"],i=Math.floor(Math.log(n)/Math.log(1024));return (n/1024**i).toFixed(i?1:0)+" "+(u[i]||"PB")}
+async function github(url,opt={}){let r=await fetch("https://api.github.com"+url,{...opt,headers:{...apiHeaders(),...(opt.headers||{})}});let t=await r.text();let d;try{d=JSON.parse(t)}catch{d={message:t}}if(!r.ok)throw Error(d.message||("GitHub error "+r.status));return d}
+
+function renderRepos(){let s=$("repoSelect");s.innerHTML="";repos.forEach((r,i)=>{let o=document.createElement("option");o.value=i;o.textContent=r.name+" — "+r.owner+"/"+r.repo+" ["+r.branch+"]";s.appendChild(o)});if(repos.length){$("appPanel").classList.remove("hidden");$("manager").classList.remove("hidden");load()}}
+$("connect").onclick=async()=>{
+ user=$("ghUser").value.trim();token=$("token").value.trim();
+ if(!user||!token)return msg("Enter username and token.",true);
+ try{let d=await github("/user");$("state").textContent="Connected as "+d.login;$("connectPanel").classList.add("hidden");$("appPanel").classList.remove("hidden");renderRepos();if(!repos.length)msg("Add your first repository.");else load()}
+ catch(e){token="";msg("Connection failed: "+e.message,true)}
+};
+$("clear").onclick=()=>{token="";user="";repos=[];sessionStorage.removeItem("gfm_repos");location.reload()}
+$("addRepo").onclick=()=>{
+ let owner=$("owner").value.trim(),repoName=$("repo").value.trim(),branch=$("branch").value.trim()||"main",name=$("display").value.trim()||repoName;
+ if(!owner||!repoName)return msg("Owner and repository are required.",true);
+ repos.push({owner,repo:repoName,branch,name});saveRepos();renderRepos();msg("Repository added.");load();
+};
+$("removeRepo").onclick=()=>{if(!repos.length)return;let i=+$("repoSelect").value;if(confirm("Remove this repository from this browser session?")){repos.splice(i,1);saveRepos();renderRepos();if(repos.length)load();else{$("manager").classList.add("hidden")}}}
+$("repoSelect").onchange=()=>{currentPath="";$("path").value="";load()}
+$("go").onclick=()=>{currentPath=$("path").value.replace(/^\/+|\/+$/g,"");load()}
+$("root").onclick=()=>{currentPath="";$("path").value="";load()}
+$("up").onclick=()=>{let a=currentPath.split("/").filter(Boolean);a.pop();currentPath=a.join("/");$("path").value=currentPath;load()}
+
+async function load(){
+ let r=repo();if(!r)return;
+ msg("Loading...");
+ try{let q=currentPath?"/repos/"+encodeURIComponent(r.owner)+"/"+encodeURIComponent(r.repo)+"/contents/"+currentPath:"/repos/"+encodeURIComponent(r.owner)+"/"+encodeURIComponent(r.repo)+"/contents";q+="?ref="+encodeURIComponent(r.branch);
+ let d=await github(q);let arr=Array.isArray(d)?d:[d];$("crumb").textContent="/"+(currentPath||"");
+ $("files").innerHTML=arr.map(x=>`<div class="row"><div class="icon">${x.type==="dir"?"📁":"📄"}</div><div class="name ${x.type==="dir"?"click":""}" data-path="${esc(x.path)}" data-type="${x.type}"><b>${esc(x.name)}</b><small>${x.type==="file"?size(x.size):"Folder"}</small></div>${x.html_url?`<a class="secondary open" target="_blank" href="${x.html_url}">GitHub</a>`:""}<button class="danger del" data-path="${esc(x.path)}" data-sha="${esc(x.sha)}">Delete</button></div>`).join("")||`<div class="row">Folder is empty</div>`;
+ document.querySelectorAll(".click").forEach(e=>e.onclick=()=>{currentPath=e.dataset.path;$("path").value=currentPath;load()});
+ document.querySelectorAll(".del").forEach(e=>e.onclick=()=>del(e.dataset.path,e.dataset.sha));
+ msg("");
+ }catch(e){msg(e.message,true)}
+}
+async function del(path,sha){
+ if(!confirm("Delete "+path+"?"))return;
+ let r=repo();try{await github("/repos/"+encodeURIComponent(r.owner)+"/"+encodeURIComponent(r.repo)+"/contents/"+path,{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:"Delete "+path,sha,branch:r.branch})});msg("Deleted "+path);load()}catch(e){msg(e.message,true)}
+}
+async function upload(){
+ let f=$("file").files[0],r=repo();if(!f||!r)return msg("Select a file.",true);
+ let p=currentPath?currentPath+"/"+f.name:f.name;
+ try{
+ msg("Reading file...");
+ let buf=await f.arrayBuffer();
+ let bytes=new Uint8Array(buf),binary="";const chunk=0x8000;
+ for(let i=0;i<bytes.length;i+=chunk)binary+=String.fromCharCode(...bytes.subarray(i,i+chunk));
+ let content=btoa(binary),sha;
+ try{let old=await github("/repos/"+r.owner+"/"+r.repo+"/contents/"+p+"?ref="+encodeURIComponent(r.branch));if(!Array.isArray(old))sha=old.sha}catch(_){}
+ msg("Uploading "+f.name+" ("+size(f.size)+")...");
+ let body={message:$("commit").value||("Update "+p),content,branch:r.branch};if(sha)body.sha=sha;
+ await github("/repos/"+r.owner+"/"+r.repo+"/contents/"+p,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+ msg("Uploaded "+p);$("file").value="";load();
+ }catch(e){msg(e.message,true)}
+}
+$("upload").onclick=upload;
+$("drop").ondragover=e=>{e.preventDefault();$("drop").classList.add("drag")}
+$("drop").ondragleave=()=>$("drop").classList.remove("drag")
+$("drop").ondrop=e=>{e.preventDefault();$("drop").classList.remove("drag");if(e.dataTransfer.files.length){$("file").files=e.dataTransfer.files;upload()}}
+</script>
+</body>
+</html>
